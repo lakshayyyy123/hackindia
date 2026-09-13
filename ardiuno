@@ -1,0 +1,230 @@
+// TactTalk - ESP32 Firmware with WiFi API
+// Drives 3 vibration motors, receives words over WiFi (no USB data cable needed after upload)
+
+#include <WiFi.h>
+#include <WebServer.h>
+
+// ===== EDIT THESE with your phone/venue WiFi details =====
+const char *WIFI_SSID = "iPhone";
+const char *WIFI_PASSWORD = "Zoroluffy";
+
+WebServer server(80);
+
+const int MOTOR1 = 25;
+const int MOTOR2 = 26;
+const int MOTOR3 = 27;
+
+const int SHORT_PULSE = 100; // ms - quick tap
+const int LONG_PULSE = 600;  // ms - clearly held buzz
+const int GAP = 200;         // ms between pulses within a pattern
+
+// Morse code table for A-Z ('.' = dot/short buzz, '-' = dash/long buzz)
+// Uses MOTOR1 only, so it never conflicts with fast-vocabulary patterns
+const char *MORSE[26] = {
+    ".-", "-...", "-.-.", "-..", ".", "..-.", "--.", "....",
+    "..", ".---", "-.-", ".-..", "--", "-.", "---", ".--.",
+    "--.-", ".-.", "...", "-", "..-", "...-", ".--", "-..-",
+    "-.--", "--.."};
+
+const int LETTER_GAP = 600; // ms silent pause between letters - long enough to feel like a real break
+const int WORD_GAP = 1200;  // ms silent pause between words - clearly longer than a letter gap
+
+void setup()
+{
+    Serial.begin(9600);
+    pinMode(MOTOR1, OUTPUT);
+    pinMode(MOTOR2, OUTPUT);
+    pinMode(MOTOR3, OUTPUT);
+    allOff();
+
+    // Connect to WiFi
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    Serial.print("Connecting to WiFi");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(400);
+        Serial.print(".");
+    }
+    Serial.println();
+    Serial.print("Connected! ESP32 IP address: ");
+    Serial.println(WiFi.localIP());
+    Serial.println("Fast words: yes/no/help/hello/stop/wait/how/are/you. Anything else spells out in Morse.");
+
+    // API endpoint: /say?word=hello
+    server.on("/say", []()
+              {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (server.hasArg("word")) {
+      String word = server.arg("word");
+      word.trim();
+      word.toLowerCase();
+      handleSentence(word);
+      server.send(200, "text/plain", "OK: played " + word);
+    } else {
+      server.send(400, "text/plain", "Missing 'word' parameter");
+    } });
+
+    // CORS support so a webpage can call this API directly
+    server.on("/say", HTTP_OPTIONS, []()
+              {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+    server.send(204); });
+
+    server.begin();
+    Serial.println("TactTalk API server ready.");
+}
+
+void loop()
+{
+    server.handleClient();
+
+    // Serial input still works too, as a backup input method
+    if (Serial.available())
+    {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+        input.toLowerCase();
+        handleSentence(input);
+    }
+}
+
+// Splits input into words separated by spaces, plays each one in turn
+void handleSentence(String sentence)
+{
+    int start = 0;
+    while (start < sentence.length())
+    {
+        int spaceIndex = sentence.indexOf(' ', start);
+        String word;
+        if (spaceIndex == -1)
+        {
+            word = sentence.substring(start);
+            start = sentence.length();
+        }
+        else
+        {
+            word = sentence.substring(start, spaceIndex);
+            start = spaceIndex + 1;
+        }
+        word.trim();
+        if (word.length() > 0)
+        {
+            handleCommand(word);
+            delay(WORD_GAP);
+        }
+    }
+}
+
+// Spells a word letter-by-letter using Morse code on MOTOR1
+void spellWord(String word)
+{
+    Serial.print("Spelling: ");
+    Serial.println(word);
+    for (int i = 0; i < word.length(); i++)
+    {
+        char c = word.charAt(i);
+        if (c < 'a' || c > 'z')
+            continue; // skip non-letters
+
+        // Marker tap on MOTOR3 signals "new letter starting" - distinct from MOTOR1's dot/dash
+        pulse(MOTOR3, 60);
+        delay(150);
+
+        const char *code = MORSE[c - 'a'];
+        for (int j = 0; code[j] != '\0'; j++)
+        {
+            if (code[j] == '.')
+            {
+                pulse(MOTOR1, SHORT_PULSE);
+            }
+            else
+            {
+                pulse(MOTOR1, LONG_PULSE);
+            }
+        }
+        delay(LETTER_GAP);
+    }
+}
+
+void allOff()
+{
+    digitalWrite(MOTOR1, LOW);
+    digitalWrite(MOTOR2, LOW);
+    digitalWrite(MOTOR3, LOW);
+}
+
+void pulse(int motorPin, int duration)
+{
+    digitalWrite(motorPin, HIGH);
+    delay(duration);
+    digitalWrite(motorPin, LOW);
+    delay(GAP);
+}
+
+void pulseCombo(int m1, int m2, int m3, int duration)
+{
+    if (m1)
+        digitalWrite(MOTOR1, HIGH);
+    if (m2)
+        digitalWrite(MOTOR2, HIGH);
+    if (m3)
+        digitalWrite(MOTOR3, HIGH);
+    delay(duration);
+    allOff();
+    delay(GAP);
+}
+
+void handleCommand(String word)
+{
+    Serial.print("Playing pattern for: ");
+    Serial.println(word);
+
+    if (word == "test")
+    {
+        pulse(MOTOR1, SHORT_PULSE);
+        pulse(MOTOR2, SHORT_PULSE);
+        pulse(MOTOR3, SHORT_PULSE);
+    }
+    else if (word == "yes")
+    {
+        pulse(MOTOR1, SHORT_PULSE);
+    }
+    else if (word == "no")
+    {
+        pulse(MOTOR3, SHORT_PULSE);
+    }
+    else if (word == "help")
+    {
+        pulseCombo(1, 1, 1, LONG_PULSE);
+    }
+    else if (word == "hello")
+    {
+        pulse(MOTOR1, SHORT_PULSE);
+        pulse(MOTOR2, SHORT_PULSE);
+    }
+    else if (word == "stop")
+    {
+        pulse(MOTOR2, LONG_PULSE);
+    }
+    else if (word == "wait")
+    {
+        pulseCombo(1, 0, 1, SHORT_PULSE);
+    }
+    else if (word == "how")
+    {
+        pulseCombo(1, 1, 0, LONG_PULSE);
+    }
+    else if (word == "are")
+    {
+        pulseCombo(0, 1, 1, LONG_PULSE);
+    }
+    else if (word == "you")
+    {
+        pulseCombo(1, 1, 1, SHORT_PULSE);
+    }
+    else
+    {
+        spellWord(word);
+    }
+}

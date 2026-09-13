@@ -1,0 +1,23 @@
+**Tech Stack**
+
+*Hardware & Components:*
+
+Microcontroller: ESP32 (Dual-Core Wi-Fi & Bluetooth MCU)
+Actuators: 3× Vibration Motors (ERM/LRA connected to GPIO 25, 26, 27)
+
+*Firmware & Environment:*
+Language: C++ / Arduino Framework
+Libraries: WiFi.h, WebServer.h
+
+*Networking & Protocols:*
+*Wireless standard: Wi-Fi (802.11 b/g/n)
+API Layer: Embedded HTTP REST API (/say endpoint) with CORS headers enabled
+
+*Input Interfaces:*
+
+HTTP GET/OPTIONS Requests (over Wi-Fi)
+Serial UART Communication (9600 baud backup)
+
+*Tactile Encoding:*
+Custom Spatial Motor Combinations
+Dynamic International Morse Code Engine
